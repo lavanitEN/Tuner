@@ -4,6 +4,8 @@ import time
 import queue
 from time import sleep
 from tkinter import Canvas
+from turtle import textinput
+
 from matplotlib.backend_bases import key_press_handler
 from matplotlib.figure import Figure
 import numpy as np
@@ -13,8 +15,13 @@ from numpy.fft import fft, ifft
 from scipy.signal import find_peaks
 
 exitFlag = 0
+frequency = 0
+cPitch = 0
+cNote = None
 dataQueue = queue.Queue()
 samplesInQueue = 0 #signifies the amount of samples that are in the processing queue
+FFTResultQueue = queue.Queue()
+
 b_startRec = False #to determine if we are recording or not
 
 def callBack(indata, frames, time, status):
@@ -22,10 +29,10 @@ def callBack(indata, frames, time, status):
    if status:
       print(status)
    maxValue = max(indata)
-   if maxValue < 0.05 and maxValue > -0.05 and b_startRec == False:
+   if maxValue < 0.1 and maxValue > -0.1 and b_startRec == False:
       return
    b_startRec = True
-   if samplesInQueue < Constants.RATE:
+   if samplesInQueue < 2*Constants.RATE:
       dataQueue.put(indata)
       samplesInQueue += frames
    else:
@@ -34,13 +41,21 @@ def callBack(indata, frames, time, status):
 
 
 class audioThread (threading.Thread):
-   def __init__(self, plotWin, canvas, plotFreq):
+
+
+   def __init__(self, plotWin, canvas, plotFreq, window):
       threading.Thread.__init__(self)
       self.running = False
       self.recording = False
       self.plotWin = plotWin
       self.canvas = canvas
       self.plotFreq = plotFreq
+      self.count = 0 
+      self.cNote = None
+      self.cPitch = None
+      self.window = window
+      # self.autoDetect = True
+      self.chordName = ""
 
    def showdata(self):
       soundData = None
@@ -51,7 +66,11 @@ class audioThread (threading.Thread):
       
       while True:
          try:
-            data = dataQueue.get_nowait()
+            # data = dataQueue.get_nowait()
+            if dataQueue.empty():
+               break
+            else:
+               data = dataQueue.get(False)
          except queue.Empty:
             break
          if soundData is None:
@@ -76,14 +95,54 @@ class audioThread (threading.Thread):
       self.fftanalysis(soundData, samplesInQueue)
       samplesInQueue = 0
    
-   def find_closest_note(pitch):
-      i = int(np.round(np.log2(pitch/Constants.CONCERT_PITCH)*12))
-      closest_note = Constants.ALL_NOTES[i%12] + str(4 + (i + 9) // 12)
-      closest_pitch = Constants.CONCERT_PITCH*2**(i/12)
-      return closest_note, closest_pitch
+   def find_closest_note(self, pitch):
+      # i = int(np.round(np.log2(pitch/Constants.CONCERT_PITCH)*12))
 
+      # closest_note = Constants.ALL_NOTES[i%12] + str(4 + (i + 9) // 12)
+      # standardFreq = Constants.STANDARDFREQ[i%12]
+      # closest_pitch = Constants.CONCERT_PITCH*2**(i/12)
+      if self.chordName == "":
+         if pitch < 92:
+            standardFreq = 82.41
+            closest_note = 'E2'
+         elif pitch < 128:
+            standardFreq = 110
+            closest_note = 'A3'
+         elif pitch < 171:
+            standardFreq = 146.83
+            closest_note = 'D3'
+         elif pitch < 221:
+            standardFreq = 196
+            closest_note = 'G3'
+         elif pitch < 287:
+            standardFreq = 246.94
+            closest_note = 'B3'
+         else:
+            standardFreq = 329.63
+            closest_note = 'E4'
+      else: #elf.chordName == "E1" or self.chordName == "A" or self.chordName == "D" or self.chordName == "G" or self.chordName == "B" or self.chordName == "E2":
+         if self.chordName == "E1":
+            standardFreq = 82.41
+            closest_note = 'E2'
+         elif self.chordName == "A":
+            standardFreq = 110
+            closest_note = 'A3'
+         elif self.chordName == "D":
+            standardFreq = 146.83
+            closest_note = 'D3'
+         elif self.chordName == "G":
+            standardFreq = 196
+            closest_note = 'G3'
+         elif self.chordName == "B":
+            standardFreq = 246.94
+            closest_note = 'B3'
+         elif self.chordName == "E2":
+            standardFreq = 246.94
+            closest_note = 'E4'
+      return closest_note, pitch, standardFreq
+   
    def fftanalysis(self, x1, framerate):
-      global frequency
+      global frequency, cPitch, cNote
       X = fft(x1)
       N = len(X)
       n = np.arange(N)
@@ -100,10 +159,14 @@ class audioThread (threading.Thread):
       self.plotFreq.clear()
       self.plotFreq.plot(int(frequency), y[idx], 'ro', label='Fundamental Frequency - ' + "{:.2f}".format(frequency) + 'Hz')
       self.plotFreq.legend(loc='upper right')
-      cNote, cPitch = self.find_closest_note(frequency)
+      cNote, cPitch, standardFreq = self.find_closest_note(frequency)
+      diff = (cPitch - standardFreq)/standardFreq
+      
+      cnp = cNote + "  " + str(round(diff*100, 2)) + '%'
+      FFTResultQueue.put(cnp)
+      self.window.event_generate('<<FFT_Result_Event>>')
       # self.plotFreq.xlim(0, 1000)
       # self.plotFreq.xlabel('Freq (Hz)')
-
       # self.plotFreq.ylabel('Amplitude')
 
    
@@ -121,7 +184,7 @@ class audioThread (threading.Thread):
                   while self.recording:
                      self.showdata()
                      
-                     sleep(0.005)
+                     sleep(0.00005)
             except Exception as e:
                print(str(e))
          sleep(0.1)

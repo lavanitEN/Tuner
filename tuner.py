@@ -15,15 +15,15 @@ from matplotlib.backends.backend_tkagg import (
 from matplotlib.backend_bases import key_press_handler
 from matplotlib.figure import Figure
 import numpy as np
-
+from audiothread import FFTResultQueue
 cBtnName = ""
 tRecord = None
 isActive = False
 
-def show(self, tinput):
+def show(var, tinput):
     global cBtnName, tRecord, f_plot1
-    print(self.get())
-    cBtnName = "" + self.get()
+    
+    cBtnName = "" + var.get()
     textDisp()
     tRecord.recording = True
     
@@ -31,10 +31,17 @@ def show(self, tinput):
     # while True:
     #     a+=1
     
+def btnClick(var, text_input):
+    name = var.get()
+    show(var, text_input)
+    if tRecord != None:
+        tRecord.chordName = name
+
 def addBtn(window, name, left, top, btnW, btnH, text_input):
     var = tkinter.StringVar()
     var.set(name)
-    btnE = tkinter.Button(window,text=name,command=lambda:show(var, text_input))
+    # btnE = tkinter.Button(window,text=name,command=lambda:show(var, text_input))
+    btnE = tkinter.Button(window,text=name,command=btnClick)
     btnE.place(x=left, y=top, width=btnW,height=btnH)
     return btnE
 
@@ -50,15 +57,15 @@ def addFrame(window, left, top, w, h):
     frame.place(x=left, y=top, width=w,height=h)
 
 def textDisp():
-    global cBtnName
+    global cBtnName, text_input
     text_input.configure(state='normal')
     text_input.tag_configure("center", justify='center')
     text = ""
     if autoDetect == True:
-        text += "Tuning mode - Manual "
+        text += "Tuning - Manual "
         text += cBtnName
     else:
-        text = "Tuning mode - Auto"
+        text = "Tuning - Auto"
     text_input.delete('1.0', '2.0')
     # text_input.insert('insert', text)
     text_input.insert('1.0', text)
@@ -97,15 +104,19 @@ def initFigure(window):
     plt.ion()
 
 def updateWin():
-    global canvas, window
+    global canvas, window, text_input
     canvas.draw()
     canvas.flush_events()
+    # var = tkinter.StringVar()
+    # var.set("hi")
+    # show(var, text_input)
     window.after(100, updateWin)
 
 autoDetect = True
 
 def ifClicked():
     global autoDetect
+    
     if autoDetect == False:
         btnE1.configure(state=NORMAL)
         btnA.configure(state=NORMAL)
@@ -115,6 +126,8 @@ def ifClicked():
         btnE2.configure(state=NORMAL)
         btnAuto.configure(text="Manual")
         autoDetect = True
+        if tRecord != None:
+            tRecord.chordName = ""
     else:
         btnE1.configure(state=DISABLED)
         btnA.configure(state=DISABLED)
@@ -124,6 +137,8 @@ def ifClicked():
         btnE2.configure(state=DISABLED)
         btnAuto.configure(text="Auto")
         autoDetect = False
+        if tRecord != None:
+            tRecord.chordName = "E1"
     textDisp()
 
 def addButtons(window, text_input):
@@ -151,7 +166,15 @@ def on_closing():
     tRecord.join(0.3)
     window.destroy()
 
-
+def FFT_Result_Update(event):
+    # print "event handler"
+    if FFTResultQueue.empty():
+        return
+    data = FFTResultQueue.get(False)
+    var = tkinter.StringVar()
+    var.set(data)
+    # var.set(event.data)
+    show(var, text_input)
 
 def initWin(title):
     global text_input, f_plot1, canvas, tRecord, window, g_plot1
@@ -169,15 +192,17 @@ def initWin(title):
     text_input = addTextBox(window, 7, 350, '')
     addButtons(window, text_input)
 
-    tRecord = audioThread(f_plot1, canvas, g_plot1)
+    tRecord = audioThread(f_plot1, canvas, g_plot1, window)
     tRecord.start()
 
     print(w-190)
     ifClicked()
+    # text_input.insert('1.0', audioThread.cNote + " - " + audioThread.cPitch)
     textDisp()
     window.resizable(0, 0)
     window.protocol("WM_DELETE_WINDOW", on_closing)
     updateWin()
+    window.bind('<<FFT_Result_Event>>', FFT_Result_Update)
     window.mainloop()
 
 initWin('Tuner')
